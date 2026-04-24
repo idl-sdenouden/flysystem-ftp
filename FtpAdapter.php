@@ -36,8 +36,8 @@ use function is_string;
 
 class FtpAdapter implements FilesystemAdapter
 {
-    private const SYSTEM_TYPE_WINDOWS = 'windows';
-    private const SYSTEM_TYPE_UNIX = 'unix';
+    private const SYSTEM_TYPE_WINDOWS = "windows";
+    private const SYSTEM_TYPE_UNIX = "unix";
 
     private ConnectionProvider $connectionProvider;
     private ConnectivityChecker $connectivityChecker;
@@ -64,10 +64,14 @@ class FtpAdapter implements FilesystemAdapter
         private bool $detectMimeTypeUsingPath = false,
     ) {
         $this->systemType = $this->connectionOptions->systemType();
-        $this->connectionProvider = $connectionProvider ?? new FtpConnectionProvider();
-        $this->connectivityChecker = $connectivityChecker ?? new NoopCommandConnectivityChecker();
-        $this->visibilityConverter = $visibilityConverter ?? new PortableVisibilityConverter();
-        $this->mimeTypeDetector = $mimeTypeDetector ?? new FinfoMimeTypeDetector();
+        $this->connectionProvider =
+            $connectionProvider ?? new FtpConnectionProvider();
+        $this->connectivityChecker =
+            $connectivityChecker ?? new NoopCommandConnectivityChecker();
+        $this->visibilityConverter =
+            $visibilityConverter ?? new PortableVisibilityConverter();
+        $this->mimeTypeDetector =
+            $mimeTypeDetector ?? new FinfoMimeTypeDetector();
         $this->useRawListOptions = $connectionOptions->useRawListOptions();
     }
 
@@ -85,15 +89,21 @@ class FtpAdapter implements FilesystemAdapter
     private function connection()
     {
         start:
-        if ( ! $this->hasFtpConnection()) {
-            $this->connection = $this->connectionProvider->createConnection($this->connectionOptions);
-            $this->rootDirectory = $this->resolveConnectionRoot($this->connection);
+        if (!$this->hasFtpConnection()) {
+            $this->connection = $this->connectionProvider->createConnection(
+                $this->connectionOptions,
+            );
+            $this->rootDirectory = $this->resolveConnectionRoot(
+                $this->connection,
+            );
             $this->prefixer = new PathPrefixer($this->rootDirectory);
 
             return $this->connection;
         }
 
-        if ($this->connectivityChecker->isConnected($this->connection) === false) {
+        if (
+            $this->connectivityChecker->isConnected($this->connection) === false
+        ) {
             $this->connection = false;
             goto start;
         }
@@ -117,22 +127,28 @@ class FtpAdapter implements FilesystemAdapter
             return $this->isPureFtpdServer;
         }
 
-        $response = ftp_raw($this->connection, 'HELP');
+        $response = ftp_raw($this->connection, "HELP");
 
-        return $this->isPureFtpdServer = stripos(implode(' ', $response), 'Pure-FTPd') !== false;
+        return $this->isPureFtpdServer =
+            stripos(implode(" ", $response), "Pure-FTPd") !== false;
     }
 
     private function isServerSupportingListOptions(): bool
     {
+        if ($this->systemType === self::SYSTEM_TYPE_WINDOWS) {
+            return false;
+        }
+
         if ($this->useRawListOptions !== null) {
             return $this->useRawListOptions;
         }
 
-        $response = ftp_raw($this->connection, 'SYST');
-        $syst = implode(' ', $response);
+        $response = ftp_raw($this->connection, "SYST");
+        $syst = implode(" ", $response);
 
-        return $this->useRawListOptions = stripos($syst, 'FileZilla') === false
-            && stripos($syst, 'L8') === false;
+        return $this->useRawListOptions =
+            stripos($syst, "FileZilla") === false &&
+            stripos($syst, "L8") === false;
     }
 
     public function fileExists(string $path): bool
@@ -149,37 +165,60 @@ class FtpAdapter implements FilesystemAdapter
     public function write(string $path, string $contents, Config $config): void
     {
         try {
-            $writeStream = fopen('php://temp', 'w+b');
+            $writeStream = fopen("php://temp", "w+b");
             fwrite($writeStream, $contents);
             rewind($writeStream);
             $this->writeStream($path, $writeStream, $config);
         } finally {
-            isset($writeStream) && is_resource($writeStream) && fclose($writeStream);
+            isset($writeStream) &&
+                is_resource($writeStream) &&
+                fclose($writeStream);
         }
     }
 
     public function writeStream(string $path, $contents, Config $config): void
     {
         try {
-            $this->ensureParentDirectoryExists($path, $config->get(Config::OPTION_DIRECTORY_VISIBILITY));
+            $this->ensureParentDirectoryExists(
+                $path,
+                $config->get(Config::OPTION_DIRECTORY_VISIBILITY),
+            );
         } catch (Throwable $exception) {
-            throw UnableToWriteFile::atLocation($path, 'creating parent directory failed', $exception);
+            throw UnableToWriteFile::atLocation(
+                $path,
+                "creating parent directory failed",
+                $exception,
+            );
         }
 
         $location = $this->prefixer()->prefixPath($path);
 
-        if ( ! ftp_fput($this->connection(), $location, $contents, $this->connectionOptions->transferMode())) {
-            throw UnableToWriteFile::atLocation($path, 'writing the file failed');
+        if (
+            !ftp_fput(
+                $this->connection(),
+                $location,
+                $contents,
+                $this->connectionOptions->transferMode(),
+            )
+        ) {
+            throw UnableToWriteFile::atLocation(
+                $path,
+                "writing the file failed",
+            );
         }
 
-        if ( ! $visibility = $config->get(Config::OPTION_VISIBILITY)) {
+        if (!($visibility = $config->get(Config::OPTION_VISIBILITY))) {
             return;
         }
 
         try {
             $this->setVisibility($path, $visibility);
         } catch (Throwable $exception) {
-            throw UnableToWriteFile::atLocation($path, 'setting visibility failed', $exception);
+            throw UnableToWriteFile::atLocation(
+                $path,
+                "setting visibility failed",
+                $exception,
+            );
         }
     }
 
@@ -195,13 +234,21 @@ class FtpAdapter implements FilesystemAdapter
     public function readStream(string $path)
     {
         $location = $this->prefixer()->prefixPath($path);
-        $stream = fopen('php://temp', 'w+b');
-        $result = @ftp_fget($this->connection(), $stream, $location, $this->connectionOptions->transferMode());
+        $stream = fopen("php://temp", "w+b");
+        $result = @ftp_fget(
+            $this->connection(),
+            $stream,
+            $location,
+            $this->connectionOptions->transferMode(),
+        );
 
-        if ( ! $result) {
+        if (!$result) {
             fclose($stream);
 
-            throw UnableToReadFile::fromLocation($path, error_get_last()['message'] ?? '');
+            throw UnableToReadFile::fromLocation(
+                $path,
+                error_get_last()["message"] ?? "",
+            );
         }
 
         rewind($stream);
@@ -224,7 +271,10 @@ class FtpAdapter implements FilesystemAdapter
         $success = @ftp_delete($connection, $location);
 
         if ($success === false && ftp_size($connection, $location) !== -1) {
-            throw UnableToDeleteFile::atLocation($path, 'the file still exists');
+            throw UnableToDeleteFile::atLocation(
+                $path,
+                "the file still exists",
+            );
         }
     }
 
@@ -243,22 +293,40 @@ class FtpAdapter implements FilesystemAdapter
             try {
                 $this->deleteFile($item->path(), $connection);
             } catch (Throwable $exception) {
-                throw UnableToDeleteDirectory::atLocation($path, 'unable to delete child', $exception);
+                throw UnableToDeleteDirectory::atLocation(
+                    $path,
+                    "unable to delete child",
+                    $exception,
+                );
             }
         }
 
         rsort($directories);
 
         foreach ($directories as $directory) {
-            if ( ! @ftp_rmdir($connection, $this->prefixer()->prefixPath($directory))) {
-                throw UnableToDeleteDirectory::atLocation($path, "Could not delete directory $directory");
+            if (
+                !@ftp_rmdir(
+                    $connection,
+                    $this->prefixer()->prefixPath($directory),
+                )
+            ) {
+                throw UnableToDeleteDirectory::atLocation(
+                    $path,
+                    "Could not delete directory $directory",
+                );
             }
         }
     }
 
     public function createDirectory(string $path, Config $config): void
     {
-        $this->ensureDirectoryExists($path, $config->get(Config::OPTION_DIRECTORY_VISIBILITY, $config->get(Config::OPTION_VISIBILITY)));
+        $this->ensureDirectoryExists(
+            $path,
+            $config->get(
+                Config::OPTION_DIRECTORY_VISIBILITY,
+                $config->get(Config::OPTION_VISIBILITY),
+            ),
+        );
     }
 
     public function setVisibility(string $path, string $visibility): void
@@ -266,8 +334,8 @@ class FtpAdapter implements FilesystemAdapter
         $location = $this->prefixer()->prefixPath($path);
         $mode = $this->visibilityConverter->forFile($visibility);
 
-        if ( ! @ftp_chmod($this->connection(), $mode, $location)) {
-            $message = error_get_last()['message'] ?? '';
+        if (!@ftp_chmod($this->connection(), $mode, $location)) {
+            $message = error_get_last()["message"] ?? "";
             throw UnableToSetVisibility::atLocation($path, $message);
         }
     }
@@ -280,19 +348,30 @@ class FtpAdapter implements FilesystemAdapter
             $location = $this->escapePath($location);
         }
 
-        $object = @ftp_raw($this->connection(), 'STAT ' . $location);
+        $object = @ftp_raw($this->connection(), "STAT " . $location);
 
-        if (empty($object) || count($object) < 3 || str_starts_with($object[1], "ftpd:")) {
-            throw UnableToRetrieveMetadata::create($path, $type, error_get_last()['message'] ?? '');
-        }
-
-        $attributes = $this->normalizeObject($object[1], '');
-
-        if ( ! $attributes instanceof FileAttributes) {
+        if (
+            empty($object) ||
+            count($object) < 3 ||
+            str_starts_with($object[1], "ftpd:")
+        ) {
             throw UnableToRetrieveMetadata::create(
                 $path,
                 $type,
-                'expected file, ' . ($attributes instanceof DirectoryAttributes ? 'directory found' : 'nothing found')
+                error_get_last()["message"] ?? "",
+            );
+        }
+
+        $attributes = $this->normalizeObject($object[1], "");
+
+        if (!$attributes instanceof FileAttributes) {
+            throw UnableToRetrieveMetadata::create(
+                $path,
+                $type,
+                "expected file, " .
+                    ($attributes instanceof DirectoryAttributes
+                        ? "directory found"
+                        : "nothing found"),
             );
         }
 
@@ -304,13 +383,20 @@ class FtpAdapter implements FilesystemAdapter
         try {
             $mimetype = $this->detectMimeTypeUsingPath
                 ? $this->mimeTypeDetector->detectMimeTypeFromPath($path)
-                : $this->mimeTypeDetector->detectMimeType($path, $this->read($path));
+                : $this->mimeTypeDetector->detectMimeType(
+                    $path,
+                    $this->read($path),
+                );
         } catch (Throwable $exception) {
-            throw UnableToRetrieveMetadata::mimeType($path, $exception->getMessage(), $exception);
+            throw UnableToRetrieveMetadata::mimeType(
+                $path,
+                $exception->getMessage(),
+                $exception,
+            );
         }
 
         if ($mimetype === null) {
-            throw UnableToRetrieveMetadata::mimeType($path, 'Unknown.');
+            throw UnableToRetrieveMetadata::mimeType($path, "Unknown.");
         }
 
         return new FileAttributes($path, null, null, null, $mimetype);
@@ -331,7 +417,10 @@ class FtpAdapter implements FilesystemAdapter
 
     public function visibility(string $path): FileAttributes
     {
-        return $this->fetchMetadata($path, FileAttributes::ATTRIBUTE_VISIBILITY);
+        return $this->fetchMetadata(
+            $path,
+            FileAttributes::ATTRIBUTE_VISIBILITY,
+        );
     }
 
     public function fileSize(string $path): FileAttributes
@@ -341,7 +430,10 @@ class FtpAdapter implements FilesystemAdapter
         $fileSize = @ftp_size($connection, $location);
 
         if ($fileSize < 0) {
-            throw UnableToRetrieveMetadata::fileSize($path, error_get_last()['message'] ?? '');
+            throw UnableToRetrieveMetadata::fileSize(
+                $path,
+                error_get_last()["message"] ?? "",
+            );
         }
 
         return new FileAttributes($path, $fileSize);
@@ -349,30 +441,32 @@ class FtpAdapter implements FilesystemAdapter
 
     public function listContents(string $path, bool $deep): iterable
     {
-        $path = ltrim($path, '/');
-        $path = $path === '' ? $path : trim($path, '/') . '/';
+        $path = ltrim($path, "/");
+        $path = $path === "" ? $path : trim($path, "/") . "/";
 
         if ($deep && $this->connectionOptions->recurseManually()) {
             yield from $this->listDirectoryContentsRecursive($path);
         } else {
             $location = $this->prefixer()->prefixPath($path);
-            $options = $deep ? '-alnR' : '-aln';
+            $options = $deep ? "-alnR" : "-aln";
             $listing = $this->ftpRawlist($options, $location);
             yield from $this->normalizeListing($listing, $path);
         }
     }
 
-    private function normalizeListing(array $listing, string $prefix = ''): Generator
-    {
+    private function normalizeListing(
+        array $listing,
+        string $prefix = "",
+    ): Generator {
         $base = $prefix;
 
         foreach ($listing as $item) {
-            if ($item === '' || preg_match('#.* \.(\.)?$|^total#', $item)) {
+            if ($item === "" || preg_match('#.* \.(\.)?$|^total#', $item)) {
                 continue;
             }
 
             if (preg_match('#^.*:$#', $item)) {
-                $base = preg_replace('~^\./*|:$~', '', $item);
+                $base = preg_replace('~^\./*|:$~', "", $item);
                 continue;
             }
 
@@ -380,9 +474,12 @@ class FtpAdapter implements FilesystemAdapter
         }
     }
 
-    private function normalizeObject(string $item, string $base): StorageAttributes
-    {
-        $this->systemType === null && $this->systemType = $this->detectSystemType($item);
+    private function normalizeObject(
+        string $item,
+        string $base,
+    ): StorageAttributes {
+        $this->systemType === null &&
+            ($this->systemType = $this->detectSystemType($item));
 
         if ($this->systemType === self::SYSTEM_TYPE_UNIX) {
             return $this->normalizeUnixObject($item, $base);
@@ -393,85 +490,113 @@ class FtpAdapter implements FilesystemAdapter
 
     private function detectSystemType(string $item): string
     {
-        return preg_match(
-            '/^[0-9]{2,4}-[0-9]{2}-[0-9]{2}/',
-            $item
-        ) ? self::SYSTEM_TYPE_WINDOWS : self::SYSTEM_TYPE_UNIX;
+        return preg_match("/^[0-9]{2,4}-[0-9]{2}-[0-9]{2}/", $item)
+            ? self::SYSTEM_TYPE_WINDOWS
+            : self::SYSTEM_TYPE_UNIX;
     }
 
-    private function normalizeWindowsObject(string $item, string $base): StorageAttributes
-    {
-        $item = preg_replace('#\s+#', ' ', trim($item), 3);
-        $parts = explode(' ', $item, 4);
+    private function normalizeWindowsObject(
+        string $item,
+        string $base,
+    ): StorageAttributes {
+        $item = preg_replace("#\s+#", " ", trim($item), 3);
+        $parts = explode(" ", $item, 4);
 
         if (count($parts) !== 4) {
-            throw new InvalidListResponseReceived("Metadata can't be parsed from item '$item' , not enough parts.");
+            throw new InvalidListResponseReceived(
+                "Metadata can't be parsed from item '$item' , not enough parts.",
+            );
         }
 
         [$date, $time, $size, $name] = $parts;
-        $path = $base === '' ? $name : rtrim($base, '/') . '/' . $name;
+        $path = $base === "" ? $name : rtrim($base, "/") . "/" . $name;
 
-        if ($size === '<DIR>') {
+        if ($size === "<DIR>") {
             return new DirectoryAttributes($path);
         }
 
         // Check for the correct date/time format
-        $format = strlen($date) === 8 ? 'm-d-yH:iA' : 'Y-m-dH:i';
+        $format = strlen($date) === 8 ? "m-d-yH:iA" : "Y-m-dH:i";
         $dt = DateTime::createFromFormat($format, $date . $time);
-        $lastModified = $dt ? $dt->getTimestamp() : (int) strtotime("$date $time");
+        $lastModified = $dt
+            ? $dt->getTimestamp()
+            : (int) strtotime("$date $time");
 
         return new FileAttributes($path, (int) $size, null, $lastModified);
     }
 
-    private function normalizeUnixObject(string $item, string $base): StorageAttributes
-    {
-        $item = preg_replace('#\s+#', ' ', trim($item), 7);
-        $parts = explode(' ', $item, 9);
+    private function normalizeUnixObject(
+        string $item,
+        string $base,
+    ): StorageAttributes {
+        $item = preg_replace("#\s+#", " ", trim($item), 7);
+        $parts = explode(" ", $item, 9);
 
         if (count($parts) !== 9) {
-            throw new InvalidListResponseReceived("Metadata can't be parsed from item '$item' , not enough parts.");
+            throw new InvalidListResponseReceived(
+                "Metadata can't be parsed from item '$item' , not enough parts.",
+            );
         }
 
-        [$permissions, /* $number */, /* $owner */, /* $group */, $size, $month, $day, $timeOrYear, $name] = $parts;
-        $isDirectory = $this->listingItemIsDirectory($permissions);
-        $permissions = $this->normalizePermissions($permissions);
-        $path = $base === '' ? $name : rtrim($base, '/') . '/' . $name;
-        $lastModified = $this->connectionOptions->timestampsOnUnixListingsEnabled() ? $this->normalizeUnixTimestamp(
+        [
+            $permissions,
+            ,
+            ,
+            /* $number */,
+            /* $owner */ /* $group */ $size,
             $month,
             $day,
-            $timeOrYear
-        ) : null;
+            $timeOrYear,
+            $name,
+        ] = $parts;
+        $isDirectory = $this->listingItemIsDirectory($permissions);
+        $permissions = $this->normalizePermissions($permissions);
+        $path = $base === "" ? $name : rtrim($base, "/") . "/" . $name;
+        $lastModified = $this->connectionOptions->timestampsOnUnixListingsEnabled()
+            ? $this->normalizeUnixTimestamp($month, $day, $timeOrYear)
+            : null;
 
         if ($isDirectory) {
             return new DirectoryAttributes(
                 $path,
                 $this->visibilityConverter->inverseForDirectory($permissions),
-                $lastModified
+                $lastModified,
             );
         }
 
         $visibility = $this->visibilityConverter->inverseForFile($permissions);
 
-        return new FileAttributes($path, (int) $size, $visibility, $lastModified);
+        return new FileAttributes(
+            $path,
+            (int) $size,
+            $visibility,
+            $lastModified,
+        );
     }
 
     private function listingItemIsDirectory(string $permissions): bool
     {
-        return str_starts_with($permissions, 'd');
+        return str_starts_with($permissions, "d");
     }
 
-    private function normalizeUnixTimestamp(string $month, string $day, string $timeOrYear): int
-    {
+    private function normalizeUnixTimestamp(
+        string $month,
+        string $day,
+        string $timeOrYear,
+    ): int {
         if (is_numeric($timeOrYear)) {
             $year = $timeOrYear;
-            $hour = '00';
-            $minute = '00';
+            $hour = "00";
+            $minute = "00";
         } else {
-            $year = date('Y');
-            [$hour, $minute] = explode(':', $timeOrYear);
+            $year = date("Y");
+            [$hour, $minute] = explode(":", $timeOrYear);
         }
 
-        $dateTime = DateTime::createFromFormat('Y-M-j-G:i:s', "$year-$month-$day-$hour:$minute:00");
+        $dateTime = DateTime::createFromFormat(
+            "Y-M-j-G:i:s",
+            "$year-$month-$day-$hour:$minute:00",
+        );
 
         return $dateTime->getTimestamp();
     }
@@ -482,7 +607,7 @@ class FtpAdapter implements FilesystemAdapter
         $permissions = substr($permissions, 1);
 
         // map the string rights to the numeric counterparts
-        $map = ['-' => '0', 'r' => '4', 'w' => '2', 'x' => '1'];
+        $map = ["-" => "0", "r" => "4", "w" => "2", "x" => "1"];
         $permissions = strtr($permissions, $map);
 
         // split up the permission groups
@@ -490,26 +615,29 @@ class FtpAdapter implements FilesystemAdapter
 
         // convert the groups
         $mapper = static function ($part) {
-            return array_sum(array_map(static function ($p) {
-                return (int) $p;
-            }, str_split($part)));
+            return array_sum(
+                array_map(static function ($p) {
+                    return (int) $p;
+                }, str_split($part)),
+            );
         };
 
         // converts to decimal number
-        return octdec(implode('', array_map($mapper, $parts)));
+        return octdec(implode("", array_map($mapper, $parts)));
     }
 
-    private function listDirectoryContentsRecursive(string $directory): Generator
-    {
+    private function listDirectoryContentsRecursive(
+        string $directory,
+    ): Generator {
         $location = $this->prefixer()->prefixPath($directory);
-        $listing = $this->ftpRawlist('-aln', $location);
+        $listing = $this->ftpRawlist("-aln", $location);
         /** @var StorageAttributes[] $listing */
         $listing = $this->normalizeListing($listing, $directory);
 
         foreach ($listing as $item) {
             yield $item;
 
-            if ( ! $item->isDir()) {
+            if (!$item->isDir()) {
                 continue;
             }
 
@@ -523,46 +651,74 @@ class FtpAdapter implements FilesystemAdapter
 
     private function ftpRawlist(string $options, string $path): array
     {
-        $path = rtrim($path, '/') . '/';
+        $path = rtrim($path, "/") . "/";
         $connection = $this->connection();
 
         if ($this->isPureFtpdServer()) {
-            $path = str_replace(' ', '\ ', $path);
+            $path = str_replace(" ", "\ ", $path);
             $path = $this->escapePath($path);
         }
 
-        if ( ! $this->isServerSupportingListOptions()) {
-            $options = '';
+        if (!$this->isServerSupportingListOptions()) {
+            $options = "";
         }
 
-        return ftp_rawlist($connection, ($options ? $options . ' ' : '') . $path, stripos($options, 'R') !== false) ?: [];
+        return ftp_rawlist(
+            $connection,
+            ($options ? $options . " " : "") . $path,
+            stripos($options, "R") !== false,
+        ) ?:
+            [];
     }
 
-    public function move(string $source, string $destination, Config $config): void
-    {
+    public function move(
+        string $source,
+        string $destination,
+        Config $config,
+    ): void {
         try {
-            $this->ensureParentDirectoryExists($destination, $config->get(Config::OPTION_DIRECTORY_VISIBILITY));
+            $this->ensureParentDirectoryExists(
+                $destination,
+                $config->get(Config::OPTION_DIRECTORY_VISIBILITY),
+            );
         } catch (Throwable $exception) {
-            throw UnableToMoveFile::fromLocationTo($source, $destination, $exception);
+            throw UnableToMoveFile::fromLocationTo(
+                $source,
+                $destination,
+                $exception,
+            );
         }
 
         $sourceLocation = $this->prefixer()->prefixPath($source);
         $destinationLocation = $this->prefixer()->prefixPath($destination);
         $connection = $this->connection();
 
-        if ( ! @ftp_rename($connection, $sourceLocation, $destinationLocation)) {
-            throw UnableToMoveFile::because(error_get_last()['message'] ?? 'reason unknown', $source, $destination);
+        if (!@ftp_rename($connection, $sourceLocation, $destinationLocation)) {
+            throw UnableToMoveFile::because(
+                error_get_last()["message"] ?? "reason unknown",
+                $source,
+                $destination,
+            );
         }
     }
 
-    public function copy(string $source, string $destination, Config $config): void
-    {
+    public function copy(
+        string $source,
+        string $destination,
+        Config $config,
+    ): void {
         try {
             $readStream = $this->readStream($source);
             $visibility = $config->get(Config::OPTION_VISIBILITY);
 
-            if ($visibility === null && $config->get(Config::OPTION_RETAIN_VISIBILITY, true)) {
-                $config = $config->withSetting(Config::OPTION_VISIBILITY, $this->visibility($source)->visibility());
+            if (
+                $visibility === null &&
+                $config->get(Config::OPTION_RETAIN_VISIBILITY, true)
+            ) {
+                $config = $config->withSetting(
+                    Config::OPTION_VISIBILITY,
+                    $this->visibility($source)->visibility(),
+                );
             }
 
             $this->writeStream($destination, $readStream, $config);
@@ -570,31 +726,41 @@ class FtpAdapter implements FilesystemAdapter
             if (isset($readStream) && is_resource($readStream)) {
                 @fclose($readStream);
             }
-            throw UnableToCopyFile::fromLocationTo($source, $destination, $exception);
+            throw UnableToCopyFile::fromLocationTo(
+                $source,
+                $destination,
+                $exception,
+            );
         }
     }
 
-    private function ensureParentDirectoryExists(string $path, ?string $visibility): void
-    {
+    private function ensureParentDirectoryExists(
+        string $path,
+        ?string $visibility,
+    ): void {
         $dirname = dirname($path);
 
-        if ($dirname === '' || $dirname === '.') {
+        if ($dirname === "" || $dirname === ".") {
             return;
         }
 
         $this->ensureDirectoryExists($dirname, $visibility);
     }
 
-    private function ensureDirectoryExists(string $dirname, ?string $visibility): void
-    {
+    private function ensureDirectoryExists(
+        string $dirname,
+        ?string $visibility,
+    ): void {
         $connection = $this->connection();
 
-        $dirPath = '';
-        $parts = explode('/', trim($dirname, '/'));
-        $mode = $visibility ? $this->visibilityConverter->forDirectory($visibility) : false;
+        $dirPath = "";
+        $parts = explode("/", trim($dirname, "/"));
+        $mode = $visibility
+            ? $this->visibilityConverter->forDirectory($visibility)
+            : false;
 
         foreach ($parts as $part) {
-            $dirPath .= '/' . $part;
+            $dirPath .= "/" . $part;
             $location = $this->prefixer()->prefixPath($dirPath);
 
             if (@ftp_chdir($connection, $location)) {
@@ -605,14 +771,23 @@ class FtpAdapter implements FilesystemAdapter
             $result = @ftp_mkdir($connection, $location);
 
             if ($result === false) {
-                $errorMessage = error_get_last()['message'] ?? 'unable to create the directory';
-                throw UnableToCreateDirectory::atLocation($dirPath, $errorMessage);
-            }
-
-            if ($mode !== false && @ftp_chmod($connection, $mode, $location) === false) {
+                $errorMessage =
+                    error_get_last()["message"] ??
+                    "unable to create the directory";
                 throw UnableToCreateDirectory::atLocation(
                     $dirPath,
-                    'unable to chmod the directory: ' . (error_get_last()['message'] ?? 'reason unknown'),
+                    $errorMessage,
+                );
+            }
+
+            if (
+                $mode !== false &&
+                @ftp_chmod($connection, $mode, $location) === false
+            ) {
+                throw UnableToCreateDirectory::atLocation(
+                    $dirPath,
+                    "unable to chmod the directory: " .
+                        (error_get_last()["message"] ?? "reason unknown"),
                 );
             }
         }
@@ -620,7 +795,7 @@ class FtpAdapter implements FilesystemAdapter
 
     private function escapePath(string $path): string
     {
-        return str_replace(['*', '[', ']'], ['\\*', '\\[', '\\]'], $path);
+        return str_replace(["*", "[", "]"], ["\\*", "\\[", "\\]"], $path);
     }
 
     /**
@@ -628,7 +803,8 @@ class FtpAdapter implements FilesystemAdapter
      */
     private function hasFtpConnection(): bool
     {
-        return $this->connection instanceof \FTP\Connection || is_resource($this->connection);
+        return $this->connection instanceof \FTP\Connection ||
+            is_resource($this->connection);
     }
 
     public function directoryExists(string $path): bool
@@ -647,15 +823,20 @@ class FtpAdapter implements FilesystemAdapter
         $root = $this->connectionOptions->root();
         error_clear_last();
 
-        if ($root !== '' && @ftp_chdir($connection, $root) !== true) {
-            throw UnableToResolveConnectionRoot::itDoesNotExist($root, error_get_last()['message'] ?? '');
+        if ($root !== "" && @ftp_chdir($connection, $root) !== true) {
+            throw UnableToResolveConnectionRoot::itDoesNotExist(
+                $root,
+                error_get_last()["message"] ?? "",
+            );
         }
 
         error_clear_last();
         $pwd = @ftp_pwd($connection);
 
-        if ( ! is_string($pwd)) {
-            throw UnableToResolveConnectionRoot::couldNotGetCurrentDirectory(error_get_last()['message'] ?? '');
+        if (!is_string($pwd)) {
+            throw UnableToResolveConnectionRoot::couldNotGetCurrentDirectory(
+                error_get_last()["message"] ?? "",
+            );
         }
 
         return $pwd;
